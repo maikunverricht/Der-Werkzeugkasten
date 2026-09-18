@@ -210,6 +210,13 @@ footer a:hover{color:var(--text)}
   .tile{animation:none;opacity:1}
   .dot,.veil{animation:none}
 }
+
+/* Lebendige Kachelzeile: läuft die Uhr, blinkt der Punkt mit. */
+.meta .push.run{color:var(--acc,#63D9C4)}
+.meta .push.run::before{content:'';display:inline-block;width:7px;height:7px;
+  border-radius:99px;background:currentColor;margin-right:6px;vertical-align:1px;
+  animation:wbpuls 1.6s ease-in-out infinite}
+@keyframes wbpuls{0%,100%{opacity:1}50%{opacity:.25}}
 </style>
 </head>
 <body>
@@ -264,8 +271,77 @@ footer a:hover{color:var(--text)}
 'use strict';
 
 /* ───────── Konfiguration: hier neue Werkzeuge eintragen ───────── */
+
+/* ════════════════════════════════════════════════════════════════
+   WERKBANK-BUS  ·  gleichlautend in jedem Werkzeug
+   ----------------------------------------------------------------
+   Alle Werkzeuge liegen unter derselben Herkunft
+   (maikunverricht.github.io). Damit teilen sie sich Speicher und
+   IndexedDB — der Pfad spielt dafür keine Rolle. Dieser Block macht
+   aus dem gemeinsamen Speicher eine Verbindung: wer etwas ändert,
+   sagt Bescheid; die anderen ziehen nach, ohne dass jemand neu
+   laden muss. Im selben Fenster, im zweiten Tab und in den Kacheln
+   des Cockpits.
+
+   Kein Server, keine gemeinsame Datei: der Block steht in jeder
+   Einzeldatei wortgleich. Ändert er sich, ändert er sich überall.
+
+   Gespiegelte Bestände (Lesekopien, geschrieben nur vom Eigentümer):
+     wb-auftragsbuch-data    Auftraggeber und Aufträge   (Auftragsbuch)
+     wb-stempeluhr-summe     Stunden je Auftrag          (Stempeluhr)
+   ════════════════════════════════════════════════════════════════ */
+const WB = (function(){
+  const KANAL = 'werkbank', WECK = 'wb-signal';
+  const eigen = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const hoerer = [];
+  let bc = null;
+  try { bc = new BroadcastChannel(KANAL); } catch (e) { /* ältere Browser */ }
+
+  function zustellen(n){
+    if (!n || typeof n !== 'object' || n.von === eigen) return;
+    for (let i = 0; i < hoerer.length; i++) {
+      const h = hoerer[i];
+      if (h.thema && h.thema !== n.thema) continue;
+      try { h.fn(n); } catch (e) {}
+    }
+  }
+  if (bc) bc.onmessage = function(e){ zustellen(e.data); };
+  /* Rückfall für Fenster ohne BroadcastChannel und für Tabs, die den
+     Kanal verpasst haben: das storage-Ereignis feuert in allen
+     übrigen Tabs derselben Herkunft. */
+  addEventListener('storage', function(e){
+    if (e.key !== WECK || !e.newValue) return;
+    try { zustellen(JSON.parse(e.newValue)); } catch (err) {}
+  });
+
+  return {
+    id: eigen,
+    /* Melden, dass sich etwas geändert hat. */
+    melden: function(thema, zusatz){
+      const n = Object.assign({ thema: thema, von: eigen, zeit: Date.now() }, zusatz || {});
+      if (bc) { try { bc.postMessage(n); } catch (e) {} }
+      try { localStorage.setItem(WECK, JSON.stringify(n)); } catch (e) {}
+    },
+    /* Auf ein Thema horchen — oder mit null auf alle. */
+    horchen: function(thema, fn){ hoerer.push({ thema: thema, fn: fn }); },
+    /* Einen gespiegelten Bestand lesen bzw. schreiben. */
+    lesen: function(schluessel){
+      try { const r = localStorage.getItem(schluessel); return r ? JSON.parse(r) : null; }
+      catch (e) { return null; }
+    },
+    schreiben: function(schluessel, wert){
+      try { localStorage.setItem(schluessel, JSON.stringify(wert)); return true; }
+      catch (e) { return false; }
+    }
+  };
+})();
+const WB_AB_LS = 'wb-auftragsbuch-data';
+const WB_ZEIT_LS = 'wb-stempeluhr-summe';
+
 const USER = 'maikunverricht';
 const APPS = [
+  { id:'auftragsbuch',   name:'Auftragsbuch',   tag:'Stammdaten',      url:'https://maikunverricht.github.io/Auftragsbuch/',   repo:'Auftragsbuch',
+    desc:'Auftraggeber, Aufträge und Konditionen an einem Ort – die Stempeluhr bedient sich hier.' },
   { id:'stempeluhr',     name:'Stempeluhr',     tag:'Zeit & Rechnung', url:'https://maikunverricht.github.io/StopUhr/',        repo:'StopUhr',
     desc:'Arbeitszeiten stempeln, Kunden und Projekten zuordnen, Auswertungen und Rechnungen erzeugen.' },
   { id:'familienplaner', name:'Familienplaner', tag:'Zuhause',         url:'https://maikunverricht.github.io/Familienplaner/', repo:'Familienplaner',
@@ -312,6 +388,40 @@ const tick = () => { const d = new Date(); clock.textContent = pad2(d.getHours()
 tick(); setInterval(tick, 15000);
 $('#st-apps').textContent = APPS.filter(a => a.type !== 'github').length;
 
+/* ───────── Was steht gerade in den Werkzeugen? ─────────
+   Die Kacheln zeigen nicht nur ein Bild, sondern den Bestand: das
+   Cockpit liest die Lesekopien mit, die Auftragsbuch und Stempeluhr
+   unter derselben Herkunft ablegen. Kein Netzaufruf, keine
+   Abhängigkeit — fehlt eine Kopie, bleibt die Zeile leer. */
+const nf1 = new Intl.NumberFormat('de-DE', { maximumFractionDigits:1 });
+function standVon(id){
+  if (id === 'auftragsbuch') {
+    const d = WB.lesen(WB_AB_LS);
+    if (!d || !Array.isArray(d.auftraggeber)) return null;
+    const offen = new Set(['geplant','aktiv','pausiert']);
+    const n = d.auftraggeber.filter(x => x && x.aktiv !== false).length;
+    const o = (d.auftraege || []).filter(x => x && offen.has(x.status)).length;
+    if (!n && !o) return null;
+    return n + ' Auftraggeber · ' + o + (o === 1 ? ' offener Auftrag' : ' offene Aufträge');
+  }
+  if (id === 'stempeluhr') {
+    const z = WB.lesen(WB_ZEIT_LS);
+    if (!z || !z.gesamt) return null;
+    const h = nf1.format((z.gesamt.sec || 0)/3600) + ' h';
+    if (z.laufend && z.laufend.aktiv) return (z.laufend.pausiert ? 'pausiert' : 'Uhr läuft') + ' · ' + h;
+    return h + ' gebucht · ' + (z.gesamt.buchungen || 0) + ' Buchungen';
+  }
+  return null;
+}
+function staendeZeigen(){
+  tiles.forEach(t => {
+    const s = standVon(t.app.id);
+    if (!s) return;
+    t.push.textContent = s;
+    t.push.classList.toggle('run', /läuft/.test(s));
+  });
+}
+
 /* ───────── Kacheln aufbauen ───────── */
 const grid = $('#grid');
 const tiles = [];
@@ -350,6 +460,14 @@ APPS.forEach((app, i) => {
   t.shot.addEventListener('click', () => { if (!t.frame.classList.contains('live')) open(app.id); });
   t.shot.addEventListener('keydown', e => { if ((e.key==='Enter'||e.key===' ') && !current) { e.preventDefault(); open(app.id); } });
 });
+
+/* Einmal beim Aufbau — und danach immer dann, wenn eines der
+   Werkzeuge etwas meldet. Die Kacheln laufen als Rahmen unter
+   derselben Herkunft: was dort drin passiert, kommt hier an. */
+staendeZeigen();
+WB.horchen(null, () => staendeZeigen());
+addEventListener('visibilitychange', () => { if (!document.hidden) staendeZeigen(); });
+setInterval(staendeZeigen, 30000);
 
 function setState(t, s, txt){ t.state.dataset.s = s; $('.s-txt', t.state).textContent = txt; }
 
@@ -523,6 +641,9 @@ ghData.then(([u, r]) => {
   const repos = r.value;
   tiles.forEach(t => {
     if (!t.app.repo) return;
+    /* Werkzeuge, die ihren eigenen Stand melden, behalten ihn –
+       das Datum des letzten Pushes sagt dort weniger. */
+    if (standVon(t.app.id)) return;
     const m = repos.find(x => x.name.toLowerCase() === t.app.repo.toLowerCase());
     if (m && m.pushed_at) t.push.textContent = 'Push ' + rel(m.pushed_at);
   });
