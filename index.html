@@ -337,6 +337,16 @@ const WB = (function(){
 })();
 const WB_AB_LS = 'wb-auftragsbuch-data';
 const WB_ZEIT_LS = 'wb-stempeluhr-summe';
+const WB_NOTES_LS = 'wb-noteos-stand';
+
+/* Aussehen gilt für die ganze Werkbank. Geschrieben werden beide
+   Schlüssel — jedes Werkzeug liest beim Start seinen eigenen, und so
+   finden alle denselben Stand vor. Gemeldet wird zusätzlich über den
+   Bus, damit offene Fenster sofort mitziehen. */
+const WB_THEME_KEYS = ['wb-theme', 'wb-cockpit-theme'];
+function wbThemeSichern(t){
+  WB_THEME_KEYS.forEach(k => { try { localStorage.setItem(k, t); } catch (e) {} });
+}
 
 const USER = 'maikunverricht';
 const APPS = [
@@ -376,11 +386,15 @@ const store = {
 };
 
 /* ───────── Theme & Uhr ───────── */
-$('#themeBtn').addEventListener('click', () => {
-  const t = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-  root.setAttribute('data-theme', t); store.set('wb-cockpit-theme', t);
+function themeSetzen(t, melden){
+  root.setAttribute('data-theme', t);
   $('meta[name="theme-color"]').content = t === 'light' ? '#EEF1F6' : '#06090E';
+  if (melden) { wbThemeSichern(t); WB.melden('theme', { theme:t }); }
+}
+$('#themeBtn').addEventListener('click', () => {
+  themeSetzen(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light', true);
 });
+WB.horchen('theme', n => { if (n.theme === 'light' || n.theme === 'dark') themeSetzen(n.theme, false); });
 $('meta[name="theme-color"]').content = root.getAttribute('data-theme') === 'light' ? '#EEF1F6' : '#06090E';
 $('#yr').textContent = new Date().getFullYear();
 const clock = $('#clock');
@@ -403,6 +417,12 @@ function standVon(id){
     const o = (d.auftraege || []).filter(x => x && offen.has(x.status)).length;
     if (!n && !o) return null;
     return n + ' Auftraggeber · ' + o + (o === 1 ? ' offener Auftrag' : ' offene Aufträge');
+  }
+  if (id === 'noteos') {
+    const n = WB.lesen(WB_NOTES_LS);
+    if (!n || !n.anzahl) return null;
+    return n.anzahl + (n.anzahl === 1 ? ' Notiz' : ' Notizen')
+         + (n.kategorien ? ' · ' + n.kategorien + ' Kategorien' : '');
   }
   if (id === 'stempeluhr') {
     const z = WB.lesen(WB_ZEIT_LS);
