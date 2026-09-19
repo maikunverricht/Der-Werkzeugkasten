@@ -117,7 +117,8 @@ h1 em{font-style:italic;font-weight:600;background:linear-gradient(94deg,var(--e
 .bus.on{opacity:1}
 body.zoomed .bus{opacity:0}
 .bus .trace{fill:none;stroke:var(--bus);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;opacity:.55}
-.bus .trace.opt{stroke-dasharray:2 7;opacity:.34}
+.bus .trace.haken{stroke-dasharray:2 7;opacity:.36}
+.bus .trace.name{stroke-dasharray:9 6;opacity:.46}
 .bus .halo{fill:none;stroke:var(--bus);stroke-width:7;opacity:.09}
 .bus .pad{fill:var(--void);stroke:var(--bus);stroke-width:1.4;opacity:.8}
 .bus .pkt{fill:var(--bus)}
@@ -154,6 +155,7 @@ pre.json{margin:14px 0 0;padding:12px 14px;border:1px solid var(--line);border-r
 .buslegend span{display:inline-flex;align-items:center;gap:7px}
 .buslegend i{width:16px;height:2px;border-radius:2px;background:currentColor;flex:none}
 .buslegend .opt{background:none;border-top:2px dotted currentColor;height:0}
+.buslegend .name{background:none;border-top:2px dashed currentColor;height:0}
 .role{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--text-3);margin:0;
   display:flex;align-items:flex-start;gap:7px;line-height:1.45}
 .role::before{content:"";width:6px;height:6px;margin-top:5px;border-radius:2px;background:var(--rc,var(--text-3));flex:none}
@@ -316,9 +318,10 @@ footer a:hover{color:var(--text)}
     <div class="stats" id="stats"><span><b id="st-apps">4</b> Werkzeuge</span><span><b>1</b> GitHub-Profil</span><span id="st-last">Letzter Push: <b>…</b></span></div>
     <div class="buslegend" aria-hidden="true">
       <span style="color:var(--amber)"><i></i>Stammdaten</span>
-      <span style="color:var(--teal)"><i></i>Zeitbuchungen</span>
-      <span><i class="opt"></i>nur mit Haken zurück</span>
-      <span>Kacheln stehen in Flussrichtung</span>
+      <span style="color:var(--teal)"><i></i>Zeit</span>
+      <span><i class="name"></i>über den Namen</span>
+      <span><i class="opt"></i>nur mit Haken</span>
+      <span>oben zurück, unten hin</span>
     </div>
   </section>
   <section class="grid" id="grid" aria-label="Werkzeuge"></section>
@@ -439,7 +442,7 @@ function wbThemeSichern(t){
 const USER = 'maikunverricht';
 const APPS = [
   { id:'auftragsbuch',   name:'Auftragsbuch',   tag:'Stammdaten',      url:'https://maikunverricht.github.io/Auftragsbuch/',   repo:'Auftragsbuch',
-    fluss:'führt Stammdaten', rc:'var(--amber)',
+    fluss:'führt Stammdaten · zeigt Zeit und Notizen dazu', rc:'var(--amber)',
     desc:'Auftraggeber, Aufträge und Konditionen an einem Ort – die Stempeluhr bedient sich hier.' },
   { id:'stempeluhr',     name:'Stempeluhr',     tag:'Zeit & Rechnung', url:'https://maikunverricht.github.io/StopUhr/',        repo:'StopUhr',
     fluss:'führt Zeitbuchungen · liest Stammdaten', rc:'var(--teal)',
@@ -448,7 +451,7 @@ const APPS = [
     fluss:'führt Prozessschritt und To-dos · liest Stammdaten und Zeit', rc:'var(--em-2)',
     desc:'Prozessschritt, verbrauchte Zeit und Budget je Auftrag – mit To-dos, Meilensteinen und Zeitstrahl.' },
   { id:'noteos',         name:'NoteOS',         tag:'Wissen',          url:'https://maikunverricht.github.io/NoteOS/',         repo:'NoteOS',
-    fluss:'eigenständig · kein gemeinsamer Bestand',
+    fluss:'liest Auftraggeber · meldet Notizen je Auftraggeber', rc:'var(--amber)',
     desc:'Notizen als Bibliothek: Regale, Bücher und Kategorien statt Ordnerlisten.' },
   { id:'github',         name:'GitHub',         tag:'Quellcode',       url:'https://github.com/'+USER,                         repo:null, type:'github',
     fluss:'Quellcode aller Werkzeuge',
@@ -660,34 +663,49 @@ function ensureLoaded(t){
    läuft in den Lücken und trägt Pakete in Flussrichtung. Ändert sich das
    Raster, wird sie neu gelegt. */
 const FLUSS = [
+  /* Hinweg unten, Rückmeldung oben. */
   { von:'auftragsbuch',   nach:'stempeluhr',     art:'stamm', seite: 1, was:'Stammdaten' },
   { von:'auftragsbuch',   nach:'auftragsstatus', art:'stamm', seite: 1, was:'Stammdaten' },
   { von:'stempeluhr',     nach:'auftragsstatus', art:'zeit',  seite: 1, was:'Zeitbuchungen' },
-  { von:'auftragsstatus', nach:'auftragsbuch',   art:'opt',   seite:-1, was:'Prozessschritt (nur mit Haken)' }
+  { von:'auftragsbuch',   nach:'noteos',         art:'kat',   seite: 1, was:'Auftraggeber als Kategorie' },
+  { von:'stempeluhr',     nach:'auftragsbuch',   art:'summe', seite:-1, was:'Stunden je Auftrag' },
+  { von:'auftragsstatus', nach:'auftragsbuch',   art:'opt',   seite:-1, was:'Prozessschritt (nur mit Haken)' },
+  { von:'noteos',         nach:'auftragsbuch',   art:'notiz', seite:-1, was:'Notizen je Auftraggeber' }
 ];
-const BUSFARBE = { stamm:'var(--amber)', zeit:'var(--teal)', opt:'var(--text-3)' };
+const BUSFARBE = { stamm:'var(--amber)', kat:'var(--amber)', zeit:'var(--teal)', summe:'var(--teal)',
+                   opt:'var(--text-3)', notiz:'var(--text-3)' };
+/* Durchgezogen heißt: verknüpft über IDs. Gestrichelt: nur über den Namen
+   des Auftraggebers – wird drüben umbenannt, reißt der Faden. Gepunktet:
+   wandert nur mit gesetztem Haken zurück. */
+const BUSSTRICH = { kat:'name', notiz:'name', opt:'haken' };
 /* Woher der Inhalt einer Leitung stammt. Gelesen wird die Lesekopie im
    localStorage; auf Wunsch die verknüpfte Datei über den Handle, den das
    führende Werkzeug in seiner IndexedDB liegen hat. Geschrieben wird nie. */
 const QUELLE = {
-  stamm: { ls:'wb-auftragsbuch-data',   idb:'wb-auftragsbuch',   werkzeug:'auftragsbuch',
-           datei:'auftragsbuch.json',   feld:null },
-  zeit:  { ls:'wb-stempeluhr-summe',    idb:null,                werkzeug:'stempeluhr',
-           datei:'stempeluhr.json',     feld:null },
-  opt:   { ls:'wb-auftragsstatus-data', idb:'wb-auftragsstatus', werkzeug:'auftragsstatus',
-           datei:'auftragsstatus.json', feld:'status' }
+  stamm: { ls:'wb-auftragsbuch-data',   idb:'wb-auftragsbuch',   datei:'auftragsbuch.json',   feld:null },
+  kat:   { ls:'wb-auftragsbuch-data',   idb:'wb-auftragsbuch',   datei:'auftragsbuch.json',   feld:'auftraggeber' },
+  zeit:  { ls:'wb-stempeluhr-summe',    idb:null,                datei:'stempeluhr.json',     feld:null },
+  summe: { ls:'wb-stempeluhr-summe',    idb:null,                datei:'stempeluhr.json',     feld:'jeAuftrag' },
+  opt:   { ls:'wb-auftragsstatus-data', idb:'wb-auftragsstatus', datei:'auftragsstatus.json', feld:'status' },
+  notiz: { ls:'wb-noteos-stand',        idb:null,                datei:'noteos-stand.json',   feld:'jeKategorie' }
 };
 function kennzahlen(art, d){
   const z = [];
   if (!d || typeof d !== 'object') return z;
-  if (art === 'stamm') {
+  if (art === 'stamm' || art === 'kat') {
     z.push(['Auftraggeber', (d.auftraggeber || []).length]);
-    z.push(['Aufträge', (d.auftraege || []).length]);
-  } else if (art === 'zeit') {
+    if (art === 'stamm') z.push(['Aufträge', (d.auftraege || []).length]);
+  } else if (art === 'notiz') {
+    z.push(['Notizen', d.anzahl || 0]);
+    z.push(['Kategorien', d.kategorien || 0]);
+    if (d.jeKategorie) z.push(['davon mit Auftraggeber', Object.keys(d.jeKategorie).length]);
+    if (d.zuletzt) z.push(['zuletzt', String(d.zuletzt)]);
+  } else if (art === 'zeit' || art === 'summe') {
     if (d.gesamt) {
       z.push(['Stunden', nf1.format((d.gesamt.sec || 0)/3600)]);
       z.push(['Buchungen', d.gesamt.buchungen || 0]);
     }
+    if (art === 'summe' && d.jeAuftrag) z.push(['Aufträge mit Zeit', Object.keys(d.jeAuftrag).length]);
     if (d.laufend && d.laufend.aktiv) z.push(['Uhr', d.laufend.pausiert ? 'pausiert' : 'läuft']);
   } else {
     z.push(['Prozessschritte', Object.keys(d.status || {}).length]);
@@ -737,27 +755,32 @@ function busZeichnen(){
   busEl.setAttribute('width', Math.round(gb.width));
   busEl.setAttribute('height', Math.round(gb.height));
 
-  let spurUnten = 0, spurOben = 0, spurRe = 0, spurLi = 0, spurMitte = 0;
+  let spurUnten = 0, spurOben = 0, spurRe = 0, spurLi = 0;
   let out = '';
   FLUSS.forEach((f, i) => {
     const a = R[f.von], b = R[f.nach];
     if (!a || !b) return;
     const farbe = BUSFARBE[f.art];
     const reihe = Math.abs(a.t - b.t) < 8;
-    const runter = b.t - a.b;
-    const nachbar = runter > 0 && runter < 90;
+    const runter = b.t - a.b, hoch = a.t - b.b;      /* Lücke, wenn b unter bzw. über a liegt */
+    const gleicheSpalte = Math.abs(a.cx - b.cx) < 8;
+    /* Eine Spur je Leitung in derselben Lücke – so bleibt jede für sich
+       anklickbar und keine verschwindet hinter einer Kachel. */
+    const spur = (grund, luecke) => grund + Math.min(14 + (spurUnten++) * 10, Math.max(12, luecke - 8));
     let pts;
     if (reihe) {
-      /* gleiche Reihe: gemeinsame Spur in der Lücke darunter bzw. darüber */
       const y = f.seite > 0
-        ? Math.max(a.b, b.b) + 14 + (spurUnten++) * 10
+        ? spur(Math.max(a.b, b.b), 999)
         : Math.min(a.t, b.t) - 14 - (spurOben++) * 10;
       pts = [[a.cx, f.seite > 0 ? a.b : a.t], [a.cx, y], [b.cx, y], [b.cx, f.seite > 0 ? b.b : b.t]];
-    } else if (nachbar && f.seite > 0) {
-      /* direkt darunter: kurzer Weg durch die Reihenlücke */
-      const gleicheSpalte = Math.abs(a.cx - b.cx) < 8;
-      const y = a.b + runter / 2 + (gleicheSpalte ? 0 : ((spurMitte++ % 2) ? 6 : -6));
-      pts = [[a.cx, a.b], [a.cx, y], [b.cx, y], [b.cx, b.t]];
+    } else if (runter > 0 && runter < 90) {
+      /* b liegt direkt darunter: durch die Reihenlücke */
+      if (gleicheSpalte) { const x = a.cx - 6; pts = [[x, a.b], [x, b.t]]; }
+      else { const y = spur(a.b, runter); pts = [[a.cx, a.b], [a.cx, y], [b.cx, y], [b.cx, b.t]]; }
+    } else if (hoch > 0 && hoch < 90) {
+      /* b liegt direkt darüber: derselbe Weg zurück, eine Spur daneben */
+      if (gleicheSpalte) { const x = a.cx + 6; pts = [[x, a.t], [x, b.b]]; }
+      else { const y = spur(b.b, hoch); pts = [[a.cx, a.t], [a.cx, y], [b.cx, y], [b.cx, b.b]]; }
     } else {
       const x = f.seite > 0
         ? maxR + Math.min(10 + (spurRe++) * 10, Math.max(6, gb.width - maxR - 4))
@@ -768,19 +791,19 @@ function busZeichnen(){
     const p0 = pts[0], pE = pts[pts.length-1];
     out += '<g style="--bus:' + farbe + '">'
         +  '<path class="halo" d="' + d + '"/>'
-        +  '<path class="trace' + (f.art === 'opt' ? ' opt' : '') + '" id="' + id + '" d="' + d + '"></path>'
+        +  '<path class="trace' + (BUSSTRICH[f.art] ? ' ' + BUSSTRICH[f.art] : '') + '" id="' + id + '" d="' + d + '"></path>'
         +  '<circle class="pad" cx="' + p0[0].toFixed(1) + '" cy="' + p0[1].toFixed(1) + '" r="3"/>'
         +  '<circle class="pad" cx="' + pE[0].toFixed(1) + '" cy="' + pE[1].toFixed(1) + '" r="3"/>';
     if (!reduce) {
       const laenge = pts.reduce((sum, p, k) => k ? sum + Math.hypot(p[0]-pts[k-1][0], p[1]-pts[k-1][1]) : 0, 0);
       const dauer = Math.max(2.4, laenge / 85);
-      const takte = f.art === 'opt' ? 1 : 2;
+      const takte = BUSSTRICH[f.art] ? 1 : 2;
       for (let k = 0; k < takte; k++) {
         const start = (-dauer * k / takte).toFixed(2) + 's';
         const mp = '<mpath href="#' + id + '" xlink:href="#' + id + '"/>';
-        out += '<circle class="aura" r="' + (f.art === 'opt' ? 4 : 5.5) + '">'
+        out += '<circle class="aura" r="' + (BUSSTRICH[f.art] ? 4 : 5.5) + '">'
             +  '<animateMotion dur="' + dauer.toFixed(2) + 's" begin="' + start + '" repeatCount="indefinite" rotate="auto">' + mp + '</animateMotion></circle>'
-            +  '<circle class="pkt" r="' + (f.art === 'opt' ? 1.9 : 2.6) + '">'
+            +  '<circle class="pkt" r="' + (BUSSTRICH[f.art] ? 1.9 : 2.6) + '">'
             +  '<animateMotion dur="' + dauer.toFixed(2) + 's" begin="' + start + '" repeatCount="indefinite" rotate="auto">' + mp + '</animateMotion></circle>';
       }
     }
