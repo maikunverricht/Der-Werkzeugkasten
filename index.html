@@ -195,10 +195,13 @@ pre.json{margin:14px 0 0;padding:12px 14px;border:1px solid var(--line);border-r
   background:color-mix(in srgb,var(--sc,var(--text-3)) 20%,transparent);
   border-color:color-mix(in srgb,var(--sc,var(--text-3)) 58%,transparent)}
 .shot:focus-visible{box-shadow:0 0 0 2px var(--amber)}
-.frame{position:absolute;inset:0;overflow:hidden;border-radius:14px;background:var(--void);border:1px solid var(--line);
-  opacity:0;pointer-events:none;visibility:hidden}
+/* Das Fenster hängt am Seitenkörper, nicht in der Kachel: so kann kein
+   Umschlag mit transform, Filter oder :hover seine feste Lage kapern –
+   ein Fehler, der sich nur in Safari zeigte. */
+.frame{position:fixed;left:0;top:0;width:0;height:0;z-index:60;overflow:hidden;border-radius:14px;
+  background:var(--void);border:1px solid transparent;box-shadow:0 40px 120px -20px rgba(0,0,0,.6);
+  opacity:0;visibility:hidden;pointer-events:none}
 .frame.fixed{opacity:1;visibility:visible}
-.frame.fixed{position:fixed;inset:auto;z-index:60;border-color:transparent;box-shadow:0 40px 120px -20px rgba(0,0,0,.6)}
 .vp{position:absolute;left:0;top:0;width:var(--W,1280px);height:var(--H,800px);transform-origin:0 0;pointer-events:none}
 .frame.live{pointer-events:auto}
 .frame.live .vp{pointer-events:auto}
@@ -591,10 +594,6 @@ APPS.forEach((app, i) => {
       <span class="shot" role="button" tabindex="0" style="--sc:${SYMFARBE[app.id] || 'var(--text-2)'}" aria-label="${esc(app.name)} öffnen">
         ${ZEICHEN[app.id] || ZEICHEN.auftragsstatus}
         <span class="state" data-s="bereit"><span class="dot"></span><span class="s-txt">bereit</span></span>
-        <span class="frame">
-          <span class="vp"></span>
-          <span class="veil"><span>${esc(app.name)} wird geladen …</span></span>
-        </span>
       </span>
       <span class="t-nm">
         <span class="t-idx">${pad2(i+1)} · ${esc(app.tag)}</span>
@@ -609,7 +608,11 @@ APPS.forEach((app, i) => {
       <div class="meta"><a href="${esc(repoUrl)}" target="_blank" rel="noopener">${app.repo ? 'Repo ↗' : 'Profil ↗'}</a></div>
     </div></div>`;
   grid.appendChild(el);
-  const t = { app, i, el, shot:$('.shot',el), frame:$('.frame',el), vp:$('.vp',el), veil:$('.veil',el),
+  const rahmen = document.createElement('div');
+  rahmen.className = 'frame';
+  rahmen.innerHTML = '<div class="vp"></div><div class="veil"><span>' + esc(app.name) + ' wird geladen …</span></div>';
+  document.body.appendChild(rahmen);
+  const t = { app, i, el, shot:$('.shot',el), frame:rahmen, vp:$('.vp',rahmen), veil:$('.veil',rahmen),
               state:$('.state',el), push:$('.push',el), loaded:false, repoUrl };
   tiles.push(t); byId[app.id] = t;
 
@@ -649,11 +652,29 @@ function ensureLoaded(t){
   f.tabIndex = -1;
   f.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
   f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-  const slow = setTimeout(() => {
-    setState(t, 'slow', 'langsam');
-    t.veil.innerHTML = `<span>Das dauert länger …</span><a class="pill" href="${esc(t.app.url)}" target="_blank" rel="noopener" style="pointer-events:auto">Direkt öffnen ↗</a>`;
-  }, 15000);
-  f.addEventListener('load', () => { clearTimeout(slow); t.veil.classList.add('gone'); setState(t, 'live', 'live'); }, { once:true });
+  const ausweichen = txt => {
+    setState(t, 'slow', 'offline');
+    t.veil.classList.remove('gone');
+    t.veil.innerHTML = `<span>${esc(txt)}</span>`
+      + `<a class="pill primary" href="${esc(t.app.url)}" target="_blank" rel="noopener" style="pointer-events:auto">Im neuen Tab öffnen ↗</a>`;
+  };
+  const slow = setTimeout(() => ausweichen('Das dauert länger als gewohnt.'), 8000);
+  f.addEventListener('load', () => {
+    clearTimeout(slow);
+    t.veil.classList.add('gone');
+    setState(t, 'live', 'live');
+    /* Alle Werkzeuge liegen unter derselben Herkunft – also lässt sich
+       nachsehen, ob wirklich etwas angekommen ist. Bleibt der Rahmen
+       leer (das kam in Safari vor), führt der Weg über den eigenen Tab. */
+    setTimeout(() => {
+      try {
+        const d = f.contentDocument;
+        if (d && d.body && (!d.body.children.length || d.body.scrollHeight < 40)) {
+          ausweichen('Dieses Werkzeug lässt sich hier nicht anzeigen.');
+        }
+      } catch (e) { /* fremde Herkunft: dann eben nicht nachsehen */ }
+    }, 700);
+  }, { once:true });
   f.src = t.app.url;
   t.vp.appendChild(f);
   t.iframe = f;
